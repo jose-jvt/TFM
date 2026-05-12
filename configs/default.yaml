@@ -16,6 +16,19 @@ data:
   # "binary"     → mask is binarised (any tarp class → 1)
   # "multiclass" → mask class IDs are used as-is (0=bg, 1-6=tarp classes)
   task: "binary"
+  # Optional class remapping applied to the mask on load.
+  # Overrides the automatic binary binarisation (mask > 0). Set to null to disable.
+  # Keys are original mask pixel values; values are the desired output class IDs.
+  # Example – collapse all tarp classes to 1 (binary):
+  #   class_mapper:
+  #     0: 0
+  #     1: 1
+  #     2: 1
+  #     3: 1
+  #     4: 1
+  #     5: 1
+  #     6: 1
+  class_mapper: null
   # Regex to extract year/region/tile from the image filename (used in area analysis)
   filename_pattern: "(?P<region>[A-Z\\-]+)_(?P<year>\\d{4})_(?P<image_type>[A-Z]+)_(?P<tile>\\d+)"
 

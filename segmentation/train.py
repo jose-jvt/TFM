@@ -40,17 +40,21 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
     seed = cfg["experiment"].get("seed", 42)
     metadata_dir = data_cfg.get("metadata_dir")
 
+    class_mapper = data_cfg.get("class_mapper")
+
     train_ds = TarpDataset(
         split_csv=data_cfg["train_csv"],
         task=task,
         transform=get_train_transforms(cfg),
         metadata_dir=metadata_dir,
+        class_mapper=class_mapper,
     )
     val_ds = TarpDataset(
         split_csv=data_cfg["val_csv"],
         task=task,
         transform=get_val_transforms(cfg),
         metadata_dir=metadata_dir,
+        class_mapper=class_mapper,
     )
 
     if use_fixed_size:

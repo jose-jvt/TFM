@@ -35,6 +35,7 @@ def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
         task=task,
         transform=get_val_transforms(cfg),
         metadata_dir=data_cfg.get("metadata_dir"),
+        class_mapper=data_cfg.get("class_mapper"),
     )
 
     if use_fixed_size:
