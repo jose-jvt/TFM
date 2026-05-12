@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from segmentation.dataset.dataset import TarpDataset, ResolutionBatchSampler
+from segmentation.evaluate import evaluate
 from segmentation.dataset.transforms import get_train_transforms, get_val_transforms
 from segmentation.losses.losses import get_loss
 from segmentation.metrics.metrics import SegmentationMetrics
@@ -196,6 +197,7 @@ def train(cfg: dict):
         patience = cfg["training"].get("early_stopping_patience", 15)
         patience_counter = 0
         grad_clip = cfg["training"].get("grad_clip", 1.0)
+        ckpt_path = ckpt_dir / "best.pt"
 
         for epoch in range(cfg["training"]["epochs"]):
             train_metrics = train_one_epoch(
@@ -223,7 +225,6 @@ def train(cfg: dict):
             if val_metrics["iou"] > best_iou:
                 best_iou = val_metrics["iou"]
                 patience_counter = 0
-                ckpt_path = ckpt_dir / "best.pt"
                 torch.save(
                     {
                         "epoch": epoch,
@@ -242,6 +243,11 @@ def train(cfg: dict):
                     break
 
         mlflow.log_metric("best_val_iou", best_iou)
+
+        # ── Automatic test evaluation with the best checkpoint ────────────
+        print("\n=== Running test evaluation on best checkpoint ===")
+        test_metrics = evaluate(cfg, str(ckpt_path))
+        mlflow.log_metrics(_prefix("test", test_metrics))
 
 
 def main():
