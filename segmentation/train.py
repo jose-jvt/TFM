@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import random
+from datetime import datetime
 from pathlib import Path
 
 import mlflow
@@ -42,6 +43,7 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
     metadata_dir = data_cfg.get("metadata_dir")
 
     class_mapper = data_cfg.get("class_mapper")
+    max_samples = data_cfg.get("max_samples")
 
     train_ds = TarpDataset(
         split_csv=data_cfg["train_csv"],
@@ -49,6 +51,7 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
         transform=get_train_transforms(cfg),
         metadata_dir=metadata_dir,
         class_mapper=class_mapper,
+        max_samples=max_samples,
     )
     val_ds = TarpDataset(
         split_csv=data_cfg["val_csv"],
@@ -56,6 +59,7 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
         transform=get_val_transforms(cfg),
         metadata_dir=metadata_dir,
         class_mapper=class_mapper,
+        max_samples=max_samples,
     )
 
     if use_fixed_size:
@@ -181,7 +185,8 @@ def train(cfg: dict):
     mlflow.set_tracking_uri(cfg["experiment"].get("mlflow_tracking_uri", "mlruns"))
     mlflow.set_experiment(cfg["experiment"]["name"])
 
-    with mlflow.start_run():
+    run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    with mlflow.start_run(run_name=run_name):
         mlflow.log_params(_flatten(cfg))
 
         train_loader, val_loader = build_dataloaders(cfg)

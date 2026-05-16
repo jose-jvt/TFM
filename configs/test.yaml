@@ -1,0 +1,48 @@
+experiment:
+  name: "test_run"
+  mlflow_tracking_uri: "mlruns"
+  seed: 42
+
+data:
+  train_csv: "dataset/train.csv"
+  val_csv:   "dataset/val.csv"
+  test_csv:  "dataset/test.csv"
+  metadata_dir: "dataset/metadata"
+  image_size: 256       # resize to 256x256 so test runs fast on CPU
+  task: "binary"
+  class_mapper: null
+  filename_pattern: "(?P<region>[A-Z\\-]+)_(?P<year>\\d{4})_(?P<image_type>[A-Z]+)_(?P<tile>\\d+)"
+
+model:
+  architecture: "unet"
+  encoder: "resnet18"   # lightest encoder
+  pretrained: false     # skip ImageNet download
+  in_channels: 3
+  num_classes: 1
+
+training:
+  epochs: 3
+  batch_size: 2
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  loss: "dice_bce"
+  focal_gamma: 2.0
+  class_weights: null
+  early_stopping_patience: 5
+  scheduler: null
+  grad_clip: 1.0
+
+augmentation:
+  enabled: false        # disable augmentation for speed
+
+inference:
+  threshold: 0.5
+  output_dir: "outputs/test_predictions"
+  save_overlay: false
+
+building_analysis:
+  min_building_area_px: 50
+  output_dir: "outputs/building_scores"
+
+area_analysis:
+  output_dir: "outputs/area_analysis"

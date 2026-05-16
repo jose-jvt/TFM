@@ -14,8 +14,9 @@ class DiceLoss(nn.Module):
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         probs = torch.sigmoid(logits)
         targets = targets.float()
-        intersection = (probs * targets).sum(dim=(1, 2, 3))
-        union = probs.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3))
+        spatial = list(range(1, probs.dim()))
+        intersection = (probs * targets).sum(dim=spatial)
+        union = probs.sum(dim=spatial) + targets.sum(dim=spatial)
         dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
         return 1.0 - dice.mean()
 
@@ -56,9 +57,6 @@ class DiceBCELoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         targets = targets.float()
-        if targets.dim() == 3:
-            targets = targets.unsqueeze(1)
-
         dice_loss = self.dice(logits, targets)
         bce_loss = F.binary_cross_entropy_with_logits(
             logits, targets, pos_weight=self.pos_weight

@@ -36,6 +36,7 @@ def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
         transform=get_val_transforms(cfg),
         metadata_dir=data_cfg.get("metadata_dir"),
         class_mapper=data_cfg.get("class_mapper"),
+        max_samples=data_cfg.get("max_samples"),
     )
 
     if use_fixed_size:
