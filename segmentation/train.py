@@ -18,9 +18,9 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from segmentation.dataset.dataset import TarpDataset, ResolutionBatchSampler
+from segmentation.data.dataset import TarpDataset, ResolutionBatchSampler
 from segmentation.evaluate import evaluate
-from segmentation.dataset.transforms import get_train_transforms, get_val_transforms
+from segmentation.data.transforms import get_train_transforms, get_val_transforms
 from segmentation.losses.losses import get_loss
 from segmentation.metrics.metrics import SegmentationMetrics
 from segmentation.models.unet import build_model

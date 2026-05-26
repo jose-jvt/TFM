@@ -18,7 +18,7 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from segmentation.dataset.transforms import get_val_transforms
+from segmentation.data.transforms import get_val_transforms
 from segmentation.models.unet import load_checkpoint
 
 _IMG_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}

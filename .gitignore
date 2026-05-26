@@ -31,7 +31,6 @@ mlartifacts/
 .ipynb_checkpoints/
 
 # IDE
-.vscode/
 .idea/
 *.swp
 

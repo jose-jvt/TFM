@@ -1,0 +1,136 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Train – debug (3 epochs, 20 samples)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "segmentation.train",
+            "args": ["--config", "configs/debug.yaml"],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Train – full (default config)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "segmentation.train",
+            "args": ["--config", "configs/default.yaml"],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Evaluate – test split",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "segmentation.evaluate",
+            "args": [
+                "--config", "configs/default.yaml",
+                "--checkpoint", "checkpoints/unet_resnet34_binary_baseline/best.pt"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Predict – directory",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "segmentation.predict",
+            "args": [
+                "--config", "configs/default.yaml",
+                "--checkpoint", "checkpoints/unet_resnet34_binary_baseline/best.pt",
+                "--input", "dataset/images"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Generate splits",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "segmentation.dataset.generate_splits",
+            "args": [
+                "--dataset-dir", "dataset",
+                "--train", "0.70",
+                "--val", "0.15",
+                "--trials", "200",
+                "--seed", "42"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Building analysis – GPKG",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "building_analysis.analyze_gpkg",
+            "args": [
+                "--gpkg",             "geodata/us-fl-englewood-2023_03202.gpkg",
+                "--output-dir",       "geodata/results/us-fl-englewood-2023_03202",
+                "--footprints-layer", "footprints",
+                "--tarps-layer",      "enclosures",
+                "--min-area",         "5.0",
+                "--grid-size",        "500"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": { "PYTHONPATH": "${workspaceFolder}" }
+        },
+        {
+            "name": "Dataset quality report",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "scripts.dataset_report",
+            "args": [
+                "--train", "dataset/train.csv",
+                "--val",   "dataset/val.csv",
+                "--test",  "dataset/test.csv",
+                "--output", "outputs/dataset_report.html"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": { "PYTHONPATH": "${workspaceFolder}" }
+        },
+        {
+            "name": "Building analysis – report",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "building_analysis.report",
+            "args": [
+                "--predictions", "outputs/predictions",
+                "--building-masks", "dataset/building_masks",
+                "--images", "dataset/images",
+                "--output", "outputs/building_scores",
+                "--config", "configs/default.yaml"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python3",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}
