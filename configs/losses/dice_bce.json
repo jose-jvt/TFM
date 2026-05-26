@@ -1,0 +1,19 @@
+{
+  "description": "Dice + BCE weighted equally. Good general-purpose baseline for binary segmentation.",
+  "losses": [
+    {
+      "name": "dice",
+      "weight": 0.5,
+      "args": {
+        "smooth": 1.0
+      }
+    },
+    {
+      "name": "bce",
+      "weight": 0.5,
+      "args": {
+        "pos_weight": null
+      }
+    }
+  ]
+}

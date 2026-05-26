@@ -1,0 +1,27 @@
+{
+  "description": "Dice + BCE + Focal, three-way combination.\n  Weights do not need to sum to 1. Here BCE and Focal share equal influence\n  and together balance the Dice term. Useful for ablation experiments.",
+  "losses": [
+    {
+      "name": "dice",
+      "weight": 0.4,
+      "args": {
+        "smooth": 1.0
+      }
+    },
+    {
+      "name": "bce",
+      "weight": 0.3,
+      "args": {
+        "pos_weight": null
+      }
+    },
+    {
+      "name": "focal",
+      "weight": 0.3,
+      "args": {
+        "gamma": 2.0,
+        "pos_weight": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "description": "Dice + Focal. Replaces the BCE term with Focal loss to down-weight easy negatives.\n  Useful when the dataset has many easy background tiles that dominate standard BCE.",
+  "losses": [
+    {
+      "name": "dice",
+      "weight": 0.5,
+      "args": {
+        "smooth": 1.0
+      }
+    },
+    {
+      "name": "focal",
+      "weight": 0.5,
+      "args": {
+        "gamma": 2.0,
+        "pos_weight": null
+      }
+    }
+  ]
+}

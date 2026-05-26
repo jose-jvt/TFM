@@ -1,0 +1,22 @@
+{
+  "description": "Focal + Tversky. Recommended for sparse/imbalanced tarp detection.\n  - Focal reduces the gradient contribution of easy background pixels.\n  - Tversky with beta=0.7 penalises false negatives more than false positives,\n    reducing missed tarps at the cost of slightly more false alarms.\n  Adjust beta towards 0.5 if precision matters more than recall.",
+  "losses": [
+    {
+      "name": "focal",
+      "weight": 0.4,
+      "args": {
+        "gamma": 2.0,
+        "pos_weight": null
+      }
+    },
+    {
+      "name": "tversky",
+      "weight": 0.6,
+      "args": {
+        "alpha": 0.3,
+        "beta": 0.7,
+        "smooth": 1.0
+      }
+    }
+  ]
+}

@@ -25,9 +25,7 @@ training:
   batch_size: 2
   learning_rate: 1.0e-4
   weight_decay: 1.0e-5
-  loss: "dice_bce"
-  focal_gamma: 2.0
-  class_weights: null
+  loss_config: "configs/losses/dice_bce.json"
   early_stopping_patience: 5
   scheduler: null
   grad_clip: 1.0
