@@ -45,3 +45,7 @@ logs/
 
 # Outputs
 outputs/
+
+# Geodata (large GeoPackage files)
+geodata/*.gpkg
+geodata/results/
