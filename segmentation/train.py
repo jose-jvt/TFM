@@ -33,7 +33,7 @@ from segmentation.data.dataset import TarpDataset, ResolutionBatchSampler
 from segmentation.evaluate import evaluate
 from segmentation.data.transforms import get_train_transforms, get_val_transforms
 from segmentation.losses.losses import get_loss
-from segmentation.metrics.metrics import SegmentationMetrics
+from segmentation.metrics.detailed_metrics import DetailedSegmentationMetrics
 from segmentation.models.unet import build_model
 import sys
 
@@ -165,6 +165,35 @@ class TrainSegmentationModel(AppBase):
     # ── Mixed-precision helpers ───────────────────────────────────────────────────
 
     @staticmethod
+    def _build_detailed_metrics(cfg: dict) -> DetailedSegmentationMetrics:
+        """Build a DetailedSegmentationMetrics instance from the YAML config.
+
+        ``num_classes`` for DetailedSegmentationMetrics counts **all** classes
+        including background (class 0):
+        - binary task  → 2  (background + 1 foreground)
+        - multiclass   → cfg[model][num_classes]  (already includes background)
+        """
+        task              = cfg["data"].get("task", "binary")
+        model_num_classes = cfg["model"].get("num_classes", 1)
+        dm_num_classes    = 2 if task == "binary" else model_num_classes
+        threshold         = cfg["inference"].get("threshold", 0.5)
+        # Optional: {class_id: name} mapping from config, e.g. {1: "tarp"}
+        class_names_raw   = cfg["data"].get("class_names")
+        class_names       = (
+            {int(k): v for k, v in class_names_raw.items()}
+            if class_names_raw else None
+        )
+        return DetailedSegmentationMetrics(
+            num_classes = dm_num_classes,
+            threshold   = threshold,
+            class_names = class_names,
+            pixel_only  = True,   # instance metrics only on test set
+        )
+
+
+    # ── Mixed-precision helpers ───────────────────────────────────────────────────
+
+    @staticmethod
     def _make_autocast(device: torch.device, enabled: bool):
         """Return an autocast context manager, or a no-op if AMP is disabled.
 
@@ -202,9 +231,10 @@ class TrainSegmentationModel(AppBase):
         grad_clip: float,
         autocast_ctx,
         scaler: torch.amp.GradScaler | None,
+        metrics: DetailedSegmentationMetrics,
     ) -> dict[str, float]:
         model.train()
-        metrics = SegmentationMetrics(task=task)
+        metrics.reset()
         total_loss = 0.0
 
         for batch in tqdm(loader, desc="Train", leave=False):
@@ -246,9 +276,10 @@ class TrainSegmentationModel(AppBase):
         device: torch.device,
         task: str,
         autocast_ctx,
+        metrics: DetailedSegmentationMetrics,
     ) -> dict[str, float]:
         model.eval()
-        metrics = SegmentationMetrics(task=task)
+        metrics.reset()
         total_loss = 0.0
 
         for batch in tqdm(loader, desc="Val", leave=False):
@@ -345,18 +376,23 @@ class TrainSegmentationModel(AppBase):
             grad_clip       = cfg["training"].get("grad_clip", 1.0)
             ckpt_path       = ckpt_dir / "best.pt"
 
+            # Build the shared metrics object (reset internally each epoch)
+            dm_metrics = self._build_detailed_metrics(cfg)
+
             for epoch in range(cfg["training"]["epochs"]):
                 task = cfg["data"].get("task", "binary")
                 train_metrics = self.train_one_epoch(
                     model, train_loader, criterion, optimizer,
                     self.device, task, grad_clip, autocast_ctx, scaler,
+                    metrics=dm_metrics,
                 )
                 val_metrics = self.validate(
                     model, val_loader, criterion, self.device, task, autocast_ctx,
+                    metrics=dm_metrics,
                 )
 
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step(val_metrics["iou"])
+                    scheduler.step(val_metrics["pixel/iou_macro"])
                 elif scheduler is not None:
                     scheduler.step()
 
@@ -368,12 +404,12 @@ class TrainSegmentationModel(AppBase):
 
                 print(
                     f"Epoch {epoch+1:3d} | "
-                    f"train_loss={train_metrics['loss']:.4f}  train_iou={train_metrics['iou']:.4f} | "
-                    f"val_loss={val_metrics['loss']:.4f}  val_iou={val_metrics['iou']:.4f}"
+                    f"train_loss={train_metrics['loss']:.4f}  train_iou={train_metrics['pixel/iou_macro']:.4f} | "
+                    f"val_loss={val_metrics['loss']:.4f}  val_iou={val_metrics['pixel/iou_macro']:.4f}"
                 )
 
-                if val_metrics["iou"] > best_iou:
-                    best_iou = val_metrics["iou"]
+                if val_metrics["pixel/iou_macro"] > best_iou:
+                    best_iou = val_metrics["pixel/iou_macro"]
                     patience_counter = 0
                     torch.save(model, f"{run.info.run_id}.pth")
                     print("Best model saved!")
@@ -383,7 +419,7 @@ class TrainSegmentationModel(AppBase):
                         print(f"Early stopping at epoch {epoch+1}")
                         break
 
-            mlflow.log_metric("best_val_iou", best_iou)
+            mlflow.log_metric("best_val_iou_macro", best_iou)
 
             # ── Automatic test evaluation with the best checkpoint ────────────
             print("\n=== Running test evaluation on best checkpoint ===")

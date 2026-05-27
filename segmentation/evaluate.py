@@ -19,7 +19,7 @@ from tqdm import tqdm
 from segmentation.data.dataset import TarpDataset, ResolutionBatchSampler
 from segmentation.data.transforms import get_val_transforms
 from segmentation.losses.losses import get_loss
-from segmentation.metrics.metrics import SegmentationMetrics
+from segmentation.metrics.detailed_metrics import DetailedSegmentationMetrics
 from segmentation.models.unet import load_checkpoint
 
 
@@ -58,10 +58,25 @@ def evaluate(cfg: dict, model) -> dict[str, float]:
         test_loader = DataLoader(test_ds, batch_sampler=sampler,
                                  num_workers=num_workers, pin_memory=pin_memory)
 
+    # Build detailed metrics (same logic as TrainSegmentationModel._build_detailed_metrics)
+    model_num_classes = cfg["model"].get("num_classes", 1)
+    dm_num_classes    = 2 if task == "binary" else model_num_classes
+    threshold         = cfg["inference"].get("threshold", 0.5)
+    class_names_raw   = cfg["data"].get("class_names")
+    class_names       = (
+        {int(k): v for k, v in class_names_raw.items()}
+        if class_names_raw else None
+    )
+    metrics = DetailedSegmentationMetrics(
+        num_classes = dm_num_classes,
+        threshold   = threshold,
+        class_names = class_names,
+        pixel_only=False
+    )
+
     # model = load_checkpoint(cfg, checkpoint_path, device)
     model.eval()
     criterion = get_loss(cfg, device)
-    metrics = SegmentationMetrics(task=task)
     total_loss = 0.0
 
     with torch.no_grad():
@@ -82,8 +97,7 @@ def evaluate(cfg: dict, model) -> dict[str, float]:
     result["loss"] = total_loss / len(test_loader)
 
     print("\n=== Test Results ===")
-    for k, v in result.items():
-        print(f"  {k}: {v:.4f}")
+    metrics.print_report(result)
 
     output_dir = Path(cfg["inference"].get("output_dir", "outputs/predictions"))
     output_dir.mkdir(parents=True, exist_ok=True)
