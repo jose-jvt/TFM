@@ -392,7 +392,7 @@ class TrainSegmentationModel(AppBase):
                 )
 
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    scheduler.step(val_metrics["pixel/iou_macro"])
+                    scheduler.step(val_metrics["pixel/iou_micro"])
                 elif scheduler is not None:
                     scheduler.step()
 
@@ -404,12 +404,12 @@ class TrainSegmentationModel(AppBase):
 
                 print(
                     f"Epoch {epoch+1:3d} | "
-                    f"train_loss={train_metrics['loss']:.4f}  train_iou={train_metrics['pixel/iou_macro']:.4f} | "
-                    f"val_loss={val_metrics['loss']:.4f}  val_iou={val_metrics['pixel/iou_macro']:.4f}"
+                    f"train_loss={train_metrics['loss']:.4f}  train_iou={train_metrics['pixel/iou_micro']:.4f} | "
+                    f"val_loss={val_metrics['loss']:.4f}  val_iou={val_metrics['pixel/iou_micro']:.4f}"
                 )
 
-                if val_metrics["pixel/iou_macro"] > best_iou:
-                    best_iou = val_metrics["pixel/iou_macro"]
+                if val_metrics["pixel/iou_micro"] > best_iou:
+                    best_iou = val_metrics["pixel/iou_micro"]
                     patience_counter = 0
                     torch.save(model, f"{run.info.run_id}.pth")
                     print("Best model saved!")
@@ -419,9 +419,7 @@ class TrainSegmentationModel(AppBase):
                         print(f"Early stopping at epoch {epoch+1}")
                         break
 
-            mlflow.log_metric("best_val_iou_macro", best_iou)
-
-            # ── Automatic test evaluation with the best checkpoint ────────────
+            # ──────── Test evaluation with the best checkpoint ────────────
             print("\n=== Running test evaluation on best checkpoint ===")
             torch.cuda.empty_cache()
             best_model = torch.load(
