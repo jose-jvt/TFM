@@ -23,12 +23,23 @@ from segmentation.metrics.metrics import SegmentationMetrics
 from segmentation.models.unet import load_checkpoint
 
 
+def _resolve_device() -> torch.device:
+    """Pick the best available device: CUDA → MPS → CPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    task = cfg["data"].get("task", "binary")
+    device = _resolve_device()
+    task   = cfg["data"].get("task", "binary")
     data_cfg = cfg["data"]
     use_fixed_size = data_cfg.get("image_size") is not None
-    batch_size = cfg["training"]["batch_size"]
+    batch_size  = cfg["training"]["batch_size"]
+    num_workers = data_cfg.get("num_workers", 4)
+    pin_memory  = device.type == "cuda"
 
     test_ds = TarpDataset(
         split_csv=data_cfg["test_csv"],
@@ -40,10 +51,12 @@ def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
     )
 
     if use_fixed_size:
-        test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=4)
+        test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False,
+                                 num_workers=num_workers, pin_memory=pin_memory)
     else:
         sampler = ResolutionBatchSampler(test_ds, batch_size=batch_size)
-        test_loader = DataLoader(test_ds, batch_sampler=sampler, num_workers=4)
+        test_loader = DataLoader(test_ds, batch_sampler=sampler,
+                                 num_workers=num_workers, pin_memory=pin_memory)
 
     model = load_checkpoint(cfg, checkpoint_path, device)
     model.eval()
@@ -54,7 +67,7 @@ def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Evaluating"):
             images = batch["image"].to(device)
-            masks = batch["mask"].to(device)
+            masks  = batch["mask"].to(device)
             logits = model(images)
 
             if task == "binary":

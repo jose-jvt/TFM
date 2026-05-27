@@ -8,10 +8,11 @@ data:
   val_csv:   "dataset/val.csv"
   test_csv:  "dataset/test.csv"
   metadata_dir: "dataset/metadata"
-  image_size: 512         # resize to 512x512 – fast on CPU, representative of real data
+  image_size: 256         # resize to 512x512 – fast on CPU, representative of real data
   task: "binary"
   class_mapper: null
   max_samples: 20         # use only 20 images per split for quick debugging
+  num_workers: 0          # 0 = main process only, safe on macOS/MPS; use 8-16 on Linux/A100
 
 model:
   architecture: "unet"
@@ -26,6 +27,8 @@ training:
   learning_rate: 1.0e-4
   weight_decay: 1.0e-5
   loss_config: "configs/losses/dice_bce.json"
+  mixed_precision: false     # set true on CUDA (A100) for faster training
+  compile: false             # set true on CUDA (A100, PyTorch ≥ 2.0) for ~20% extra speed
   early_stopping_patience: 5
   scheduler: null
   grad_clip: 1.0

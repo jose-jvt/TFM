@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import random
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +27,15 @@ from segmentation.metrics.metrics import SegmentationMetrics
 from segmentation.models.unet import build_model
 
 
+def resolve_device() -> torch.device:
+    """Pick the best available device: CUDA → MPS → CPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -34,16 +44,19 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
-    data_cfg = cfg["data"]
+def build_dataloaders(cfg: dict, device: torch.device) -> tuple[DataLoader, DataLoader]:
+    data_cfg  = cfg["data"]
     use_fixed_size = data_cfg.get("image_size") is not None
-    task = data_cfg.get("task", "binary")
+    task       = data_cfg.get("task", "binary")
     batch_size = cfg["training"]["batch_size"]
-    seed = cfg["experiment"].get("seed", 42)
+    seed       = cfg["experiment"].get("seed", 42)
     metadata_dir = data_cfg.get("metadata_dir")
+    num_workers  = data_cfg.get("num_workers", 4)
+    # pin_memory speeds up host→GPU transfers; not supported on MPS
+    pin_memory = device.type == "cuda"
 
     class_mapper = data_cfg.get("class_mapper")
-    max_samples = data_cfg.get("max_samples")
+    max_samples  = data_cfg.get("max_samples")
 
     train_ds = TarpDataset(
         split_csv=data_cfg["train_csv"],
@@ -64,16 +77,20 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader]:
 
     if use_fixed_size:
         train_loader = DataLoader(
-            train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+            train_ds, batch_size=batch_size, shuffle=True,
+            num_workers=num_workers, pin_memory=pin_memory,
         )
         val_loader = DataLoader(
-            val_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+            val_ds, batch_size=batch_size, shuffle=False,
+            num_workers=num_workers, pin_memory=pin_memory,
         )
     else:
         train_sampler = ResolutionBatchSampler(train_ds, batch_size=batch_size, seed=seed)
-        val_sampler = ResolutionBatchSampler(val_ds, batch_size=batch_size, drop_last=False)
-        train_loader = DataLoader(train_ds, batch_sampler=train_sampler, num_workers=4, pin_memory=True)
-        val_loader = DataLoader(val_ds, batch_sampler=val_sampler, num_workers=4, pin_memory=True)
+        val_sampler   = ResolutionBatchSampler(val_ds,   batch_size=batch_size, drop_last=False)
+        train_loader  = DataLoader(train_ds, batch_sampler=train_sampler,
+                                   num_workers=num_workers, pin_memory=pin_memory)
+        val_loader    = DataLoader(val_ds,   batch_sampler=val_sampler,
+                                   num_workers=num_workers, pin_memory=pin_memory)
 
     return train_loader, val_loader
 
@@ -98,6 +115,33 @@ def build_scheduler(optimizer, cfg: dict):
     return None
 
 
+# ── Mixed-precision helpers ───────────────────────────────────────────────────
+
+def _make_autocast(device: torch.device, enabled: bool):
+    """Return an autocast context manager, or a no-op if AMP is disabled.
+
+    * CUDA  → torch.amp.autocast('cuda', float16)   – full AMP
+    * MPS   → torch.amp.autocast('mps',  float16)   – autocast only (no scaler)
+    * CPU   → nullcontext                            – AMP not useful on CPU
+    """
+    if not enabled or device.type == "cpu":
+        return nullcontext()
+    return torch.amp.autocast(device_type=device.type, dtype=torch.float16)
+
+
+def _make_scaler(device: torch.device, enabled: bool) -> torch.amp.GradScaler | None:
+    """Return a GradScaler for CUDA AMP, or None otherwise.
+
+    GradScaler is only meaningful on CUDA. MPS and CPU run without it.
+    """
+    if enabled and device.type == "cuda":
+        return torch.amp.GradScaler("cuda")
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -106,6 +150,8 @@ def train_one_epoch(
     device: torch.device,
     task: str,
     grad_clip: float,
+    autocast_ctx,
+    scaler: torch.amp.GradScaler | None,
 ) -> dict[str, float]:
     model.train()
     metrics = SegmentationMetrics(task=task)
@@ -113,16 +159,25 @@ def train_one_epoch(
 
     for batch in tqdm(loader, desc="Train", leave=False):
         images = batch["image"].to(device)
-        masks = batch["mask"].to(device)
+        masks  = batch["mask"].to(device)
 
-        logits = model(images)
-        loss = _compute_loss(criterion, logits, masks, task)
+        with autocast_ctx:
+            logits = model(images)
+            loss   = _compute_loss(criterion, logits, masks, task)
 
         optimizer.zero_grad()
-        loss.backward()
-        if grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            if grad_clip > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
 
         total_loss += loss.item()
         metrics.update(logits.detach(), masks)
@@ -139,6 +194,7 @@ def validate(
     criterion: nn.Module,
     device: torch.device,
     task: str,
+    autocast_ctx,
 ) -> dict[str, float]:
     model.eval()
     metrics = SegmentationMetrics(task=task)
@@ -146,9 +202,10 @@ def validate(
 
     for batch in tqdm(loader, desc="Val", leave=False):
         images = batch["image"].to(device)
-        masks = batch["mask"].to(device)
-        logits = model(images)
-        total_loss += _compute_loss(criterion, logits, masks, task).item()
+        masks  = batch["mask"].to(device)
+        with autocast_ctx:
+            logits = model(images)
+            total_loss += _compute_loss(criterion, logits, masks, task).item()
         metrics.update(logits, masks)
 
     result = metrics.compute()
@@ -179,8 +236,25 @@ def _flatten(d: dict, parent_key: str = "", sep: str = ".") -> dict:
 
 def train(cfg: dict):
     set_seed(cfg["experiment"].get("seed", 42))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    task = cfg["data"].get("task", "binary")
+    device = resolve_device()
+    task   = cfg["data"].get("task", "binary")
+
+    # ── CUDA-specific backend optimisations ───────────────────────────────────
+    if device.type == "cuda":
+        # TF32 on Ampere (A100/A10/A30/…): faster matmul with negligible precision loss.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32       = True
+
+    # ── Mixed precision ───────────────────────────────────────────────────────
+    use_amp      = cfg["training"].get("mixed_precision", False)
+    autocast_ctx = _make_autocast(device, use_amp)
+    scaler       = _make_scaler(device, use_amp)
+    amp_label    = (
+        "AMP enabled (autocast + GradScaler)" if scaler is not None
+        else f"AMP enabled (autocast only, no scaler on {device.type})" if use_amp and device.type != "cpu"
+        else "AMP disabled"
+    )
+    print(f"  Device: {device}  |  {amp_label}")
 
     mlflow.set_tracking_uri(cfg["experiment"].get("mlflow_tracking_uri", "mlruns"))
     mlflow.set_experiment(cfg["experiment"]["name"])
@@ -189,8 +263,16 @@ def train(cfg: dict):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params(_flatten(cfg))
 
-        train_loader, val_loader = build_dataloaders(cfg)
+        train_loader, val_loader = build_dataloaders(cfg, device)
         model = build_model(cfg).to(device)
+
+        # ── torch.compile (PyTorch 2.x, CUDA only) ────────────────────────────
+        if cfg["training"].get("compile", False):
+            if hasattr(torch, "compile") and device.type == "cuda":
+                model = torch.compile(model)
+                print("  torch.compile() applied — first batch will be slower (tracing)")
+            else:
+                print("  torch.compile skipped (requires PyTorch ≥ 2.0 and CUDA)")
         criterion = get_loss(cfg, device)
         optimizer = build_optimizer(model, cfg)
         scheduler = build_scheduler(optimizer, cfg)
@@ -198,17 +280,20 @@ def train(cfg: dict):
         ckpt_dir = Path("checkpoints") / cfg["experiment"]["name"]
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        best_iou = 0.0
-        patience = cfg["training"].get("early_stopping_patience", 15)
+        best_iou        = 0.0
+        patience        = cfg["training"].get("early_stopping_patience", 15)
         patience_counter = 0
-        grad_clip = cfg["training"].get("grad_clip", 1.0)
-        ckpt_path = ckpt_dir / "best.pt"
+        grad_clip       = cfg["training"].get("grad_clip", 1.0)
+        ckpt_path       = ckpt_dir / "best.pt"
 
         for epoch in range(cfg["training"]["epochs"]):
             train_metrics = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, task, grad_clip
+                model, train_loader, criterion, optimizer,
+                device, task, grad_clip, autocast_ctx, scaler,
             )
-            val_metrics = validate(model, val_loader, criterion, device, task)
+            val_metrics = validate(
+                model, val_loader, criterion, device, task, autocast_ctx,
+            )
 
             if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 scheduler.step(val_metrics["iou"])
