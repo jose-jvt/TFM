@@ -32,7 +32,7 @@ def _resolve_device() -> torch.device:
     return torch.device("cpu")
 
 
-def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
+def evaluate(cfg: dict, model) -> dict[str, float]:
     device = _resolve_device()
     task   = cfg["data"].get("task", "binary")
     data_cfg = cfg["data"]
@@ -58,7 +58,7 @@ def evaluate(cfg: dict, checkpoint_path: str) -> dict[str, float]:
         test_loader = DataLoader(test_ds, batch_sampler=sampler,
                                  num_workers=num_workers, pin_memory=pin_memory)
 
-    model = load_checkpoint(cfg, checkpoint_path, device)
+    # model = load_checkpoint(cfg, checkpoint_path, device)
     model.eval()
     criterion = get_loss(cfg, device)
     metrics = SegmentationMetrics(task=task)

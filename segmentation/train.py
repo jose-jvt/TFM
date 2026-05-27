@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import argparse
 import random
+import time
+import traceback
+from datetime import timedelta
 from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
@@ -41,7 +44,22 @@ def resolve_device() -> torch.device:
 
 
 
+APP_NAME = "ml_segmentation_model_training"
+APP_EPILOG = "This application trains a model for segmentation"
 class TrainSegmentationModel(AppBase):
+    def __init__(self):
+        description = "This application trains a model for segmentation"
+
+        super().__init__(
+            app_name=APP_NAME, app_description=description, app_epilog=APP_EPILOG
+        )
+
+        self.add_argument(
+            "--config",
+            type=str,
+            required=True,
+            help=f"Path to the YAML config file (e.g. configs/default.yaml)",
+        )
 
     @staticmethod
     def set_seed(seed: int):
@@ -291,15 +309,17 @@ class TrainSegmentationModel(AppBase):
         )
         print(f"  Device: {self.device}  |  {amp_label}")
 
+        jira_ticket_url = getattr(self, "jira_ticket_url", None)
         self.mlflow_setup(cfg)
+
         run_name = MLFlowNamer.define_run_name(
-            self.args.loss_function,
-            self.args.optimizer,
-            self.args.initial_lr,
-            self.args.architecture_name,
-            self.args.encoder_name,
+            [cfg["training"].get("loss", "dice_bce")],
+            "AdamW",
+            cfg["training"].get("learning_rate", 1e-4),
+            cfg["model"].get("architecture", "unet"),
+            cfg["model"].get("encoder", "resnet34"),
         )
-        with mlflow.start_run(run_name=run_name, description=self.jira_ticket_url):
+        with mlflow.start_run(run_name=run_name, description=jira_ticket_url) as run:
             mlflow.log_params(self._flatten(cfg))
 
             train_loader, val_loader = self.build_dataloaders(cfg, self.device)
@@ -326,12 +346,13 @@ class TrainSegmentationModel(AppBase):
             ckpt_path       = ckpt_dir / "best.pt"
 
             for epoch in range(cfg["training"]["epochs"]):
+                task = cfg["data"].get("task", "binary")
                 train_metrics = self.train_one_epoch(
                     model, train_loader, criterion, optimizer,
-                    self.device, self.task, grad_clip, autocast_ctx, scaler,
+                    self.device, task, grad_clip, autocast_ctx, scaler,
                 )
                 val_metrics = self.validate(
-                    model, val_loader, criterion, self.device, self.task, autocast_ctx,
+                    model, val_loader, criterion, self.device, task, autocast_ctx,
                 )
 
                 if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -354,17 +375,8 @@ class TrainSegmentationModel(AppBase):
                 if val_metrics["iou"] > best_iou:
                     best_iou = val_metrics["iou"]
                     patience_counter = 0
-                    torch.save(
-                        {
-                            "epoch": epoch,
-                            "model_state_dict": model.state_dict(),
-                            "optimizer_state_dict": optimizer.state_dict(),
-                            "val_iou": best_iou,
-                            "cfg": cfg,
-                        },
-                        ckpt_path,
-                    )
-                    mlflow.log_artifact(str(ckpt_path))
+                    torch.save(model, f"{run.info.run_id}.pth")
+                    print("Best model saved!")
                 else:
                     patience_counter += 1
                     if patience_counter >= patience:
@@ -375,8 +387,39 @@ class TrainSegmentationModel(AppBase):
 
             # ── Automatic test evaluation with the best checkpoint ────────────
             print("\n=== Running test evaluation on best checkpoint ===")
-            test_metrics = evaluate(cfg, str(ckpt_path))
+            torch.cuda.empty_cache()
+            best_model = torch.load(
+                f"{run.info.run_id}.pth", weights_only=False)
+            test_metrics = evaluate(cfg, best_model)
             mlflow.log_metrics(self._prefix("test", test_metrics))
+
+
+    def run(self) -> bool:
+        logging.info(f"Running {self.app_name} app...")
+        try:
+            # Load config from --config argument
+            config_path = self.args.config
+            with open(config_path, "r") as f:
+                cfg = yaml.safe_load(f)
+
+            if self.__initialize_app(cfg):
+                init_time = time.time()
+                exit_ok = self.train(cfg)
+                finish_time = time.time()
+                logging.info(
+                    f"Total elapsed time {timedelta(seconds=finish_time - init_time)}"
+                )
+            else:
+                logging.info(f"Initializing {self.app_name}... failed")
+                exit_ok = False
+        except Exception as e:
+            logging.critical(f"Uncaught exception: {str(e)}")
+            logging.critical(traceback.format_exc())
+            exit_ok = False
+        finally:
+            logging.info(f"{self.app_name} app finished")
+        return exit_ok
+
 
     def __initialize_app(self, cfg: dict):
         logging.info(f"Initializing {self.app_name}...")
@@ -385,7 +428,7 @@ class TrainSegmentationModel(AppBase):
             self.set_seed(exp_cfg.get("seed", 42))
             jira_ticket = exp_cfg.get("jira_ticket")
             self.task   = cfg["data"].get("task", "binary")
-            self.is_binary_segmentation = self.args.num_classes == 1
+            self.is_binary_segmentation = cfg["model"].get("num_classes", 1) == 1
             if jira_ticket:
                 self.jira_ticket_url = MLFlowNamer.define_jira_ticket_url(
                     jira_ticket
