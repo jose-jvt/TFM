@@ -145,7 +145,9 @@ class TrainSegmentationModel(AppBase):
         logging.info("Setting up the MLflow logger...")
         try:
             mlflow_cfg = cfg.get("experiment", {})
-            aws_profile = mlflow_cfg.get("aws_profile")
+            aws_profile = None
+            if self.args.aws_profile is not None:
+                aws_profile = self.args.aws_profile
 
             username, password, url = Secrets(aws_profile=aws_profile).get_mlflow_user(
                 env=self.args.env
